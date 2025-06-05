@@ -1,9 +1,6 @@
 from contextlib import contextmanager
 
-import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -12,14 +9,13 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 import warnings
 import matplotlib
 import time
-from datetime import datetime
 
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy_utils import database_exists, create_database
 
-from dao.student_dao import save_student_batch
-from database.db import engine, SessionLocal
-from models.student_models import Base, ImportRecord, StudentData
+from backend.dao.student_dao import save_student_batch
+from backend.database.db import engine, SessionLocal
+from backend.models.student_models import Base, ImportRecord, StudentData
 
 matplotlib.use('TkAgg')
 warnings.filterwarnings('ignore')
@@ -207,8 +203,7 @@ class AcademicWarningSystem:
         self.df['Academic_Risk'] = (self.df['Total_Score'] < 60).astype(int)
 
         # ORM 更新数据库中 Academic_Risk 字段
-        from models.student_models import StudentData  # 你的 ORM 模型
-        from contextlib import contextmanager
+        from backend.models.student_models import StudentData  # 你的 ORM 模型
         try:
             with self.get_db_session() as db:
                 for _, row in self.df.iterrows():
@@ -462,57 +457,57 @@ class AcademicWarningSystem:
             return self.df[['Student_ID', 'First_Name', 'Last_Name',
                             'Total_Score', 'Risk_Probability', 'Risk_Level', 'Risk_Prediction']]
 
-    def generate_visualizations(self):
-        """生成可视化图表"""
-        if self.df is None:
-            return
-
-        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        fig.suptitle('学业预警系统 - 数据分析报告', fontsize=16)
-
-        axes[0, 0].hist(self.df['Total_Score'], bins=20, alpha=0.7, color='skyblue')
-        axes[0, 0].axvline(x=60, color='red', linestyle='--', label='及格线')
-        axes[0, 0].set_title('总成绩分布')
-        axes[0, 0].set_xlabel('总成绩')
-        axes[0, 0].set_ylabel('学生人数')
-        axes[0, 0].legend()
-
-        if 'Risk_Level' in self.df.columns:
-            risk_counts = self.df['Risk_Level'].value_counts()
-            axes[0, 1].pie(risk_counts.values, labels=risk_counts.index, autopct='%1.1f%%')
-            axes[0, 1].set_title('学业风险等级分布')
-
-        axes[0, 2].scatter(self.df['Attendance (%)'], self.df['Total_Score'], alpha=0.6)
-        axes[0, 2].set_title('出勤率与总成绩关系')
-        axes[0, 2].set_xlabel('出勤率 (%)')
-        axes[0, 2].set_ylabel('总成绩')
-
-        if 'Department' in self.df.columns:
-            dept_scores = []
-            dept_names = []
-            for dept in self.df['Department'].unique():
-                dept_data = self.df[self.df['Department'] == dept]['Total_Score']
-                dept_scores.append(dept_data)
-                dept_names.append(dept)
-            axes[1, 0].boxplot(dept_scores, labels=dept_names)
-            axes[1, 0].set_title('各系别成绩分布')
-            axes[1, 0].tick_params(axis='x', rotation=45)
-
-        axes[1, 1].scatter(self.df['Study_Hours_per_Week'], self.df['Total_Score'], alpha=0.6)
-        axes[1, 1].set_title('每周学习时间与成绩关系')
-        axes[1, 1].set_xlabel('每周学习时间(小时)')
-        axes[1, 1].set_ylabel('总成绩')
-
-        stress_avg = self.df.groupby('Stress_Level (1-10)')['Total_Score'].mean()
-        axes[1, 2].bar(stress_avg.index, stress_avg.values)
-        axes[1, 2].set_title('压力水平与平均成绩关系')
-        axes[1, 2].set_xlabel('压力水平')
-        axes[1, 2].set_ylabel('平均成绩')
-
-        plt.tight_layout()
-        plt.show()
-
-        self.show_warning_statistics()
+    # def generate_visualizations(self):
+    #     """生成可视化图表"""
+    #     if self.df is None:
+    #         return
+    #
+    #     fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+    #     fig.suptitle('学业预警系统 - 数据分析报告', fontsize=16)
+    #
+    #     axes[0, 0].hist(self.df['Total_Score'], bins=20, alpha=0.7, color='skyblue')
+    #     axes[0, 0].axvline(x=60, color='red', linestyle='--', label='及格线')
+    #     axes[0, 0].set_title('总成绩分布')
+    #     axes[0, 0].set_xlabel('总成绩')
+    #     axes[0, 0].set_ylabel('学生人数')
+    #     axes[0, 0].legend()
+    #
+    #     if 'Risk_Level' in self.df.columns:
+    #         risk_counts = self.df['Risk_Level'].value_counts()
+    #         axes[0, 1].pie(risk_counts.values, labels=risk_counts.index, autopct='%1.1f%%')
+    #         axes[0, 1].set_title('学业风险等级分布')
+    #
+    #     axes[0, 2].scatter(self.df['Attendance (%)'], self.df['Total_Score'], alpha=0.6)
+    #     axes[0, 2].set_title('出勤率与总成绩关系')
+    #     axes[0, 2].set_xlabel('出勤率 (%)')
+    #     axes[0, 2].set_ylabel('总成绩')
+    #
+    #     if 'Department' in self.df.columns:
+    #         dept_scores = []
+    #         dept_names = []
+    #         for dept in self.df['Department'].unique():
+    #             dept_data = self.df[self.df['Department'] == dept]['Total_Score']
+    #             dept_scores.append(dept_data)
+    #             dept_names.append(dept)
+    #         axes[1, 0].boxplot(dept_scores, labels=dept_names)
+    #         axes[1, 0].set_title('各系别成绩分布')
+    #         axes[1, 0].tick_params(axis='x', rotation=45)
+    #
+    #     axes[1, 1].scatter(self.df['Study_Hours_per_Week'], self.df['Total_Score'], alpha=0.6)
+    #     axes[1, 1].set_title('每周学习时间与成绩关系')
+    #     axes[1, 1].set_xlabel('每周学习时间(小时)')
+    #     axes[1, 1].set_ylabel('总成绩')
+    #
+    #     stress_avg = self.df.groupby('Stress_Level (1-10)')['Total_Score'].mean()
+    #     axes[1, 2].bar(stress_avg.index, stress_avg.values)
+    #     axes[1, 2].set_title('压力水平与平均成绩关系')
+    #     axes[1, 2].set_xlabel('压力水平')
+    #     axes[1, 2].set_ylabel('平均成绩')
+    #
+    #     plt.tight_layout()
+    #     plt.show()
+    #
+    #     self.show_warning_statistics()
 
     def show_warning_statistics(self):
         """显示预警统计信息"""
@@ -536,3 +531,455 @@ class AcademicWarningSystem:
                 print(f"\n高风险学生列表 (共{len(high_risk)}人):")
                 print(high_risk[['Student_ID', 'First_Name', 'Last_Name',
                                  'Total_Score', 'Risk_Probability']].head(10))
+
+
+# 学业预警系统 - 缺失函数实现
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime
+from sqlalchemy.orm import Session
+
+
+class AcademicWarningSystemExtended:
+    """学业预警系统扩展类 - 实现缺失的方法"""
+
+    def __init__(self, academic_system:AcademicWarningSystem):
+        """
+        初始化扩展类
+
+        Args:
+            academic_system: 主要的AcademicWarningSystem实例
+        """
+        self.system = academic_system
+
+    def preprocess_data(self):
+        """
+        数据预处理主函数
+        整合数据清洗、特征工程等步骤
+
+        Returns:
+            bool: 预处理是否成功
+        """
+        try:
+            print("开始数据预处理...")
+
+            # 检查数据是否已加载
+            if self.system.df is None:
+                print("错误：请先加载数据")
+                return False
+
+            # 步骤1：数据清洗
+            if not self.system.clean_data():
+                print("数据清洗失败")
+                return False
+
+            # 步骤2：特征工程
+            self.system.prepare_features()
+
+            # 步骤3：数据验证
+            self._validate_preprocessed_data()
+
+            print("数据预处理完成！")
+            return True
+
+        except Exception as e:
+            print(f"数据预处理失败：{e}")
+            return False
+
+    def _validate_preprocessed_data(self):
+        """验证预处理后的数据质量"""
+        df = self.system.df
+
+        print("\n=== 数据预处理验证 ===")
+        print(f"最终数据维度: {df.shape}")
+        print(f"缺失值数量: {df.isnull().sum().sum()}")
+        print(f"特征列数量: {len(self.system.feature_columns)}")
+
+        # 检查目标变量分布
+        if 'Academic_Risk' in df.columns:
+            risk_dist = df['Academic_Risk'].value_counts()
+            print(f"目标变量分布: {risk_dist.to_dict()}")
+
+    def load_data_by_import_id(self, import_id: str, db: Session) -> bool:
+        """
+        根据导入ID从数据库加载数据
+
+        Args:
+            import_id (str): 导入记录ID
+            db (Session): 数据库会话
+
+        Returns:
+            bool: 加载是否成功
+        """
+        try:
+            print(f"正在从数据库加载导入ID为 {import_id} 的数据...")
+
+            # 调用系统的加载方法
+            success = self.system.load_data_from_db(import_id, db)
+
+            if success:
+                print(f"数据加载成功！共 {len(self.system.df)} 条记录")
+                # 显示数据概览
+                self._show_data_overview()
+            else:
+                print("数据加载失败")
+
+            return success
+
+        except Exception as e:
+            print(f"加载数据时出错：{e}")
+            return False
+
+    def _show_data_overview(self):
+        """显示数据概览"""
+        df = self.system.df
+        if df is not None:
+            print("\n=== 数据概览 ===")
+            print(f"学生总数: {len(df)}")
+            print(f"数据列数: {len(df.columns)}")
+
+            if 'Total_Score' in df.columns:
+                print(f"平均成绩: {df['Total_Score'].mean():.2f}")
+                print(f"及格学生数: {(df['Total_Score'] >= 60).sum()}")
+                print(f"不及格学生数: {(df['Total_Score'] < 60).sum()}")
+
+    def generate_warnings(self) -> dict:
+        """
+        生成预警信息
+
+        Returns:
+            dict: 包含各类预警信息的字典
+        """
+        try:
+            print("正在生成预警信息...")
+
+            if self.system.df is None:
+                return {"error": "未加载数据"}
+
+            df = self.system.df
+            warnings = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "total_students": len(df),
+                "warnings": []
+            }
+
+            # 成绩预警
+            score_warnings = self._generate_score_warnings(df)
+            warnings["warnings"].extend(score_warnings)
+
+            # 出勤预警
+            attendance_warnings = self._generate_attendance_warnings(df)
+            warnings["warnings"].extend(attendance_warnings)
+
+            # 学习时间预警
+            study_time_warnings = self._generate_study_time_warnings(df)
+            warnings["warnings"].extend(study_time_warnings)
+
+            # 压力水平预警
+            stress_warnings = self._generate_stress_warnings(df)
+            warnings["warnings"].extend(stress_warnings)
+
+            # 如果已经进行了风险预测
+            if 'Risk_Level' in df.columns:
+                risk_warnings = self._generate_risk_warnings(df)
+                warnings["warnings"].extend(risk_warnings)
+
+            # 统计预警数量
+            warnings["warning_count"] = len(warnings["warnings"])
+            warnings["high_priority_count"] = len([w for w in warnings["warnings"]
+                                                   if w.get("priority") == "高"])
+
+            print(f"预警生成完成！共生成 {warnings['warning_count']} 条预警")
+            return warnings
+
+        except Exception as e:
+            print(f"生成预警信息失败：{e}")
+            return {"error": str(e)}
+
+    def _generate_score_warnings(self, df) -> list:
+        """生成成绩相关预警"""
+        warnings = []
+
+        if 'Total_Score' in df.columns:
+            # 不及格预警
+            failing_students = df[df['Total_Score'] < 60]
+            for _, student in failing_students.iterrows():
+                warnings.append({
+                    "type": "成绩预警",
+                    "student_id": student.get('Student_ID', 'Unknown'),
+                    "student_name": f"{student.get('First_Name', '')} {student.get('Last_Name', '')}".strip(),
+                    "message": f"总成绩不及格 ({student['Total_Score']:.1f}分)",
+                    "priority": "高",
+                    "score": student['Total_Score']
+                })
+
+            # 成绩下滑预警（如果有期中和期末成绩）
+            if 'Midterm_Score' in df.columns and 'Final_Score' in df.columns:
+                declining_students = df[df['Final_Score'] < df['Midterm_Score'] - 10]
+                for _, student in declining_students.iterrows():
+                    score_drop = student['Midterm_Score'] - student['Final_Score']
+                    warnings.append({
+                        "type": "成绩下滑预警",
+                        "student_id": student.get('Student_ID', 'Unknown'),
+                        "student_name": f"{student.get('First_Name', '')} {student.get('Last_Name', '')}".strip(),
+                        "message": f"成绩显著下滑 (下降{score_drop:.1f}分)",
+                        "priority": "中",
+                        "score_drop": score_drop
+                    })
+
+        return warnings
+
+    def _generate_attendance_warnings(self, df) -> list:
+        """生成出勤相关预警"""
+        warnings = []
+
+        if 'Attendance (%)' in df.columns:
+            low_attendance = df[df['Attendance (%)'] < 80]
+            for _, student in low_attendance.iterrows():
+                priority = "高" if student['Attendance (%)'] < 60 else "中"
+                warnings.append({
+                    "type": "出勤预警",
+                    "student_id": student.get('Student_ID', 'Unknown'),
+                    "student_name": f"{student.get('First_Name', '')} {student.get('Last_Name', '')}".strip(),
+                    "message": f"出勤率偏低 ({student['Attendance (%)']:.1f}%)",
+                    "priority": priority,
+                    "attendance": student['Attendance (%)']
+                })
+
+        return warnings
+
+    def _generate_study_time_warnings(self, df) -> list:
+        """生成学习时间相关预警"""
+        warnings = []
+
+        if 'Study_Hours_per_Week' in df.columns:
+            low_study_time = df[df['Study_Hours_per_Week'] < 10]
+            for _, student in low_study_time.iterrows():
+                warnings.append({
+                    "type": "学习时间预警",
+                    "student_id": student.get('Student_ID', 'Unknown'),
+                    "student_name": f"{student.get('First_Name', '')} {student.get('Last_Name', '')}".strip(),
+                    "message": f"每周学习时间不足 ({student['Study_Hours_per_Week']:.1f}小时)",
+                    "priority": "中",
+                    "study_hours": student['Study_Hours_per_Week']
+                })
+
+        return warnings
+
+    def _generate_stress_warnings(self, df) -> list:
+        """生成压力水平相关预警"""
+        warnings = []
+
+        if 'Stress_Level (1-10)' in df.columns:
+            high_stress = df[df['Stress_Level (1-10)'] >= 8]
+            for _, student in high_stress.iterrows():
+                warnings.append({
+                    "type": "压力水平预警",
+                    "student_id": student.get('Student_ID', 'Unknown'),
+                    "student_name": f"{student.get('First_Name', '')} {student.get('Last_Name', '')}".strip(),
+                    "message": f"压力水平过高 ({student['Stress_Level (1-10)']}/10)",
+                    "priority": "中",
+                    "stress_level": student['Stress_Level (1-10)']
+                })
+
+        return warnings
+
+    def _generate_risk_warnings(self, df) -> list:
+        """生成风险预测相关预警"""
+        warnings = []
+
+        high_risk_students = df[df['Risk_Level'].isin(['高风险', '极高风险'])]
+        for _, student in high_risk_students.iterrows():
+            priority = "高" if student['Risk_Level'] == '极高风险' else "中"
+            warnings.append({
+                "type": "学业风险预警",
+                "student_id": student.get('Student_ID', 'Unknown'),
+                "student_name": f"{student.get('First_Name', '')} {student.get('Last_Name', '')}".strip(),
+                "message": f"学业风险等级：{student['Risk_Level']} (概率：{student.get('Risk_Probability', 0):.2%})",
+                "priority": priority,
+                "risk_level": student['Risk_Level'],
+                "risk_probability": student.get('Risk_Probability', 0)
+            })
+
+        return warnings
+
+    def export_results(self, export_format='csv', filename=None) -> str:
+        """
+        导出分析结果
+
+        Args:
+            export_format (str): 导出格式 ('csv', 'excel', 'json')
+            filename (str): 文件名（可选）
+
+        Returns:
+            str: 导出文件的路径
+        """
+        try:
+            if self.system.df is None:
+                raise ValueError("没有可导出的数据")
+
+            # 生成默认文件名
+            if filename is None:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"academic_warning_results_{timestamp}"
+
+            df = self.system.df.copy()
+
+            # 选择要导出的核心列
+            export_columns = [
+                'Student_ID', 'First_Name', 'Last_Name', 'Total_Score',
+                'Attendance (%)', 'Department'
+            ]
+
+            # 添加预测结果列（如果存在）
+            if 'Risk_Probability' in df.columns:
+                export_columns.extend(['Risk_Probability', 'Risk_Level', 'Risk_Prediction'])
+
+            if 'Academic_Risk' in df.columns:
+                export_columns.append('Academic_Risk')
+
+            # 过滤存在的列
+            available_columns = [col for col in export_columns if col in df.columns]
+            export_df = df[available_columns]
+
+            # 根据格式导出
+            if export_format.lower() == 'csv':
+                filepath = f"{filename}.csv"
+                export_df.to_csv(filepath, index=False, encoding='utf-8-sig')
+
+            elif export_format.lower() == 'excel':
+                filepath = f"{filename}.xlsx"
+                with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+                    export_df.to_excel(writer, sheet_name='学生预警结果', index=False)
+
+                    # 如果有预警信息，也导出
+                    warnings = self.generate_warnings()
+                    if warnings.get('warnings'):
+                        warning_df = pd.DataFrame(warnings['warnings'])
+                        warning_df.to_excel(writer, sheet_name='预警详情', index=False)
+
+            elif export_format.lower() == 'json':
+                filepath = f"{filename}.json"
+                export_data = {
+                    'export_time': datetime.now().isoformat(),
+                    'total_students': len(export_df),
+                    'data': export_df.to_dict('records')
+                }
+
+                # 添加预警信息
+                warnings = self.generate_warnings()
+                export_data['warnings'] = warnings
+
+                import json
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump(export_data, f, ensure_ascii=False, indent=2)
+
+            else:
+                raise ValueError(f"不支持的导出格式: {export_format}")
+
+            print(f"结果已导出到: {filepath}")
+            print(f"导出记录数: {len(export_df)}")
+
+            return filepath
+
+        except Exception as e:
+            print(f"导出结果失败：{e}")
+            return None
+
+    # def show_visualizations(self):
+    #     """
+    #     显示数据可视化图表
+    #     调用系统的可视化方法并添加额外的图表
+    #     """
+    #     try:
+    #         print("正在生成可视化图表...")
+    #
+    #         if self.system.df is None:
+    #             print("错误：没有可视化的数据")
+    #             return
+    #
+    #         # 调用系统原有的可视化方法
+    #         self.system.generate_visualizations()
+    #
+    #         # 添加额外的可视化
+    #         self._show_additional_visualizations()
+    #
+    #     except Exception as e:
+    #         print(f"显示可视化图表失败：{e}")
+
+    def _show_additional_visualizations(self):
+        """显示额外的可视化图表"""
+        df = self.system.df
+
+        # 如果有风险预测结果，显示风险分析图
+        if 'Risk_Probability' in df.columns and 'Risk_Level' in df.columns:
+            self._plot_risk_analysis()
+
+        # 显示相关性热力图
+        self._plot_correlation_heatmap()
+
+    def _plot_risk_analysis(self):
+        """绘制风险分析图表"""
+        df = self.system.df
+
+        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+        fig.suptitle('学业风险分析', fontsize=14)
+
+        # 风险概率分布
+        axes[0].hist(df['Risk_Probability'], bins=20, alpha=0.7, color='orange')
+        axes[0].axvline(x=0.5, color='red', linestyle='--', label='风险阈值')
+        axes[0].set_title('风险概率分布')
+        axes[0].set_xlabel('风险概率')
+        axes[0].set_ylabel('学生人数')
+        axes[0].legend()
+
+        # 各系别风险分布
+        if 'Department' in df.columns:
+            risk_by_dept = df.groupby('Department')['Risk_Probability'].mean().sort_values(ascending=False)
+            axes[1].bar(range(len(risk_by_dept)), risk_by_dept.values)
+            axes[1].set_title('各系别平均风险概率')
+            axes[1].set_xlabel('系别')
+            axes[1].set_ylabel('平均风险概率')
+            axes[1].set_xticks(range(len(risk_by_dept)))
+            axes[1].set_xticklabels(risk_by_dept.index, rotation=45)
+
+        plt.tight_layout()
+        plt.show()
+
+    def _plot_correlation_heatmap(self):
+        """绘制相关性热力图"""
+        df = self.system.df
+
+        # 选择数值型列
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        if len(numeric_cols) > 1:
+            plt.figure(figsize=(12, 10))
+            correlation_matrix = df[numeric_cols].corr()
+
+            # 只显示重要的相关性
+            mask = np.abs(correlation_matrix) < 0.1
+
+            sns.heatmap(correlation_matrix,
+                        annot=True,
+                        cmap='coolwarm',
+                        center=0,
+                        fmt='.2f',
+                        mask=mask,
+                        square=True)
+            plt.title('特征相关性热力图')
+            plt.tight_layout()
+            plt.show()
+
+
+    def update_predictions_in_db(self, db):
+        return self.system.update_predictions_in_db(db)
+
+    # def build_model(self):
+    #     return self.system.build_model()
+    #
+    # def load_data(self, temp_path, db):
+    #     self.system.load_data(temp_path, db)
+
+

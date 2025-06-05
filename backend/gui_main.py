@@ -1,4 +1,4 @@
-from dataprocess.academic_warning_gui import AcademicWarningGUI
+from backend.dataprocess import AcademicWarningGUI
 
 
 def main():
