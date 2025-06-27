@@ -6,32 +6,36 @@ export default defineConfig({
   server: {
     proxy: {
       '/records': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '/data': {
-        target: 'http://localhost:8000',
+         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '/model': {
-        target: 'http://localhost:8000',
+         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '/warnings': {
-        target: 'http://localhost:8000',
+         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '/export': {
-        target: 'http://localhost:8000',
+         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '/student': {
-        target: 'http://localhost:8000',
+         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '/visualizations': {
-        target: 'http://localhost:8000',
+         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
+      },
+      '/analysis': {
+         target: 'http://127.0.0.1:8000',
+         changeOrigin: true,
       },
     }
   }

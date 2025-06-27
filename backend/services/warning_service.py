@@ -1,6 +1,6 @@
 """
-学业预警系统 - 业务层
-Business Layer for Academic Warning System
+房价数据分析系统 - 业务层
+Business Layer for House Price Analysis System
 
 将业务逻辑从数据处理层分离出来，为接口层提供服务
 """
@@ -9,20 +9,32 @@ from typing import Dict, List, Any
 from datetime import datetime
 import pandas as pd
 import numpy as np
-from matplotlib import pyplot as plt
+import matplotlib
+matplotlib.use('Agg')  # 设置非交互式后端
+import matplotlib.pyplot as plt
+import seaborn as sns
 from sqlalchemy.orm import Session
 import os
+import re
+from sklearn.metrics import (roc_auc_score, accuracy_score, precision_score, 
+                             recall_score, f1_score, roc_curve, 
+                             precision_recall_curve, confusion_matrix)
 
-# from backend.dataprocess.data_processor import AcademicWarningSystem, AcademicWarningSystemExtended
-from backend.dataprocess.data_processor import AcademicWarningSystem
+# 设置中文字体
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS']
+plt.rcParams['axes.unicode_minus'] = False
+
+
+# from backend.dataprocess.data_processor import HousePriceAnalysisSystem
+from backend.dataprocess.data_processor_new import HousePriceAnalysisSystem
 from backend.database.db import SessionLocal
 
 
-class AcademicWarningBusinessService:
-    """学业预警系统业务服务层"""
+class HousePriceAnalysisBusinessService:
+    """房价数据分析系统业务服务层"""
 
     def __init__(self):
-        self.system = AcademicWarningSystem()
+        self.system = HousePriceAnalysisSystem()
         self.current_import_id = None
 
     def get_db_session(self):
@@ -52,7 +64,7 @@ class AcademicWarningBusinessService:
                 }
 
             # 加载数据
-            success = self.system.load_data(file_path, db)
+            success = self.system.load_data(file_path)
 
             if success:
                 self.current_import_id = self.system.import_id
@@ -60,8 +72,9 @@ class AcademicWarningBusinessService:
                     "success": True,
                     "message": "数据加载成功",
                     "import_id": self.current_import_id,
-                    "row_count": len(self.system.df) if self.system.df is not None else 0,
-                    "columns": self.system.df.columns.tolist() if self.system.df is not None else []
+                    "row_count": int(len(self.system.df)) if self.system.df is not None else 0,
+                    "columns": self.system.df.columns.tolist() if self.system.df is not None else [],
+                    "data_overview": self._get_data_overview()
                 }
             else:
                 return {
@@ -98,7 +111,7 @@ class AcademicWarningBusinessService:
                     "success": True,
                     "message": "历史数据加载成功",
                     "import_id": import_id,
-                    "row_count": len(self.system.df) if self.system.df is not None else 0,
+                    "row_count": int(len(self.system.df)) if self.system.df is not None else 0,
                     "data_overview": self._get_data_overview()
                 }
             else:
@@ -128,22 +141,19 @@ class AcademicWarningBusinessService:
         """
         try:
             records = self.system.get_import_records()
-
-            # 格式化记录
             formatted_records = []
             for record in records:
                 formatted_records.append({
                     "import_id": record[0],
                     "import_time": record[1].strftime("%Y-%m-%d %H:%M:%S") if record[1] else "",
                     "file_path": record[2],
-                    "row_count": record[3],
+                    "row_count": int(record[3]) if record[3] is not None else 0,
                     "description": record[4] or ""
                 })
-
             return {
                 "success": True,
                 "records": formatted_records,
-                "total_count": len(formatted_records)
+                "total_count": int(len(formatted_records))
             }
 
         except Exception as e:
@@ -170,36 +180,27 @@ class AcademicWarningBusinessService:
                     "message": "没有可处理的数据，请先加载数据",
                     "error_code": "NO_DATA"
                 }
-
-            # 记录预处理前的数据状态
             before_shape = self.system.df.shape
-            before_null_count = self.system.df.isnull().sum().sum()
-
-            # 执行预处理
+            before_null_count = int(self.system.df.isnull().sum().sum())
             success = self.system.preprocess_data()
-
             if success:
-                # 记录预处理后的数据状态
                 after_shape = self.system.df.shape
-                after_null_count = self.system.df.isnull().sum().sum()
-
+                after_null_count = int(self.system.df.isnull().sum().sum())
                 return {
                     "success": True,
                     "message": "数据预处理完成",
-                    "preprocessing_summary": {
-                        "before_shape": before_shape,
-                        "after_shape": after_shape,
-                        "before_null_count": int(before_null_count),
-                        "after_null_count": int(after_null_count),
-                        "feature_count": len(self.system.feature_columns),
-                        "features": self.system.feature_columns
-                    }
+                    "before_shape": tuple(map(int, before_shape)),
+                    "after_shape": tuple(map(int, after_shape)),
+                    "before_null_count": before_null_count,
+                    "after_null_count": after_null_count,
+                    "cleaned_rows": int(before_shape[0]) - int(after_shape[0]),
+                    "data_overview": self._get_data_overview()
                 }
             else:
                 return {
                     "success": False,
                     "message": "数据预处理失败",
-                    "error_code": "PREPROCESSING_FAILED"
+                    "error_code": "PREPROCESS_FAILED"
                 }
 
         except Exception as e:
@@ -221,42 +222,22 @@ class AcademicWarningBusinessService:
             if self.system.df is None:
                 return {
                     "success": False,
-                    "message": "没有可用的数据，请先加载并预处理数据",
+                    "message": "没有可处理的数据，请先加载并预处理数据",
                     "error_code": "NO_DATA"
                 }
 
-            if not self.system.feature_columns:
-                return {
-                    "success": False,
-                    "message": "特征列未准备好，请先执行数据预处理",
-                    "error_code": "NO_FEATURES"
-                }
-
             # 构建模型
-            model_results = self.system.build_model()
+            success = self.system.build_model()
 
-            if self.system.model is not None:
-                # 准备模型性能信息
-                model_info = {
-                    "model_type": type(self.system.model).__name__,
-                    "feature_count": len(self.system.feature_columns),
-                    "training_data_size": len(self.system.df),
-                    "optimal_threshold": self.system.optimal_threshold
-                }
-
-                # 如果有特征重要性
-                if hasattr(self.system.model, 'feature_importances_'):
-                    feature_importance = list(zip(
-                        self.system.feature_columns,
-                        self.system.model.feature_importances_
-                    ))
-                    feature_importance.sort(key=lambda x: x[1], reverse=True)
-                    model_info["top_features"] = feature_importance[:10]
-
+            if success:
+                model_info = self.system.get_model_info()
                 return {
                     "success": True,
                     "message": "模型构建完成",
-                    "model_info": model_info
+                    "model_type": model_info.get("model_type", "未知"),
+                    "features": model_info.get("features", []),
+                    "target": model_info.get("target", "未知"),
+                    "model_performance": model_info.get("performance", {})
                 }
             else:
                 return {
@@ -268,161 +249,122 @@ class AcademicWarningBusinessService:
         except Exception as e:
             return {
                 "success": False,
-                "message": f"模型构建时发生错误: {str(e)}",
+                "message": f"构建模型时发生错误: {str(e)}",
                 "error_code": "EXCEPTION",
                 "error_details": str(e)
             }
 
-    # ==================== 预警业务 ====================
-
-    def generate_academic_warnings(self, db: Session) -> Dict[str, Any]:
+    def generate_house_analysis(self, db: Session) -> Dict[str, Any]:
         """
-        生成学业预警的业务逻辑
+        生成房价分析的业务逻辑
 
         Args:
             db: 数据库会话
 
         Returns:
-            Dict: 预警生成结果
+            Dict: 分析结果信息
         """
         try:
             if self.system.df is None:
                 return {
                     "success": False,
-                    "message": "没有可用的数据，请先加载数据",
+                    "message": "没有可处理的数据，请先加载数据",
                     "error_code": "NO_DATA"
                 }
 
-            # 先进行风险预测（如果模型已构建）
-            if self.system.model is not None:
-                self.system.predict_risk()
+            # 执行分析
+            success = self.system.analyze_house_data()
 
-            # 生成预警信息
-            warnings_data = self.system.generate_warnings()
+            if success:
+                analysis_results = self.system.get_analysis_results()
+                
+                # 保存分析结果到数据库
+                if self.current_import_id:
+                    self.system.save_analysis_results_to_db(self.current_import_id, db)
 
-            if "error" in warnings_data:
+                return {
+                    "success": True,
+                    "message": "房价分析完成",
+                    "total_houses": int(len(self.system.df)),
+                    "analysis_summary": {
+                        "price_analysis": self._get_price_analysis_data(),
+                        "location_analysis": self._get_location_analysis_data(),
+                        "house_type_analysis": self._get_house_type_analysis_data(),
+                        "investment_recommendations": self._get_investment_recommendations()
+                    },
+                    "detailed_results": analysis_results
+                }
+            else:
                 return {
                     "success": False,
-                    "message": f"生成预警失败: {warnings_data['error']}",
-                    "error_code": "WARNING_GENERATION_FAILED"
+                    "message": "房价分析失败",
+                    "error_code": "ANALYSIS_FAILED"
                 }
-
-            # 分析预警统计
-            warning_stats = self._analyze_warnings(warnings_data["warnings"])
-
-            return {
-                "success": True,
-                "message": "预警生成成功",
-                "warning_summary": {
-                    "total_students": warnings_data["total_students"],
-                    "total_warnings": warnings_data["warning_count"],
-                    "high_priority_warnings": warnings_data["high_priority_count"],
-                    "warning_types": warning_stats["warning_types"],
-                    "department_risks": warning_stats.get("department_risks", {}),
-                    "generated_at": warnings_data["timestamp"]
-                },
-                "warnings": warnings_data["warnings"]
-            }
 
         except Exception as e:
             return {
                 "success": False,
-                "message": f"生成预警时发生错误: {str(e)}",
+                "message": f"生成房价分析时发生错误: {str(e)}",
                 "error_code": "EXCEPTION",
                 "error_details": str(e)
             }
 
-    def get_student_risk_details(self, student_id: str) -> Dict[str, Any]:
+    def get_house_analysis_details(self, house_id: str) -> Dict[str, Any]:
         """
-        获取特定学生的风险详情
+        获取特定房屋分析详情的业务逻辑
 
         Args:
-            student_id: 学生ID
+            house_id: 房屋ID
 
         Returns:
-            Dict: 学生风险详情
+            Dict: 房屋分析详情
         """
         try:
             if self.system.df is None:
                 return {
                     "success": False,
-                    "message": "没有可用的数据",
+                    "message": "没有可处理的数据",
                     "error_code": "NO_DATA"
                 }
 
-            # 查找学生
-            student_data = self.system.df[
-                self.system.df['Student_ID'].astype(str) == str(student_id)
-                ]
+            # 查找房屋数据
+            house_data = self.system.get_house_details(house_id)
 
-            if student_data.empty:
+            if house_data is not None:
+                return {
+                    "success": True,
+                    "house_data": house_data,
+                    "analysis": {
+                        "price_analysis": self._analyze_house_price(house_data),
+                        "location_analysis": self._analyze_house_location(house_data),
+                        "investment_analysis": self._analyze_investment_potential(house_data)
+                    }
+                }
+            else:
                 return {
                     "success": False,
-                    "message": "未找到指定学生",
-                    "error_code": "STUDENT_NOT_FOUND"
+                    "message": "未找到指定的房屋数据",
+                    "error_code": "HOUSE_NOT_FOUND"
                 }
-
-            student = student_data.iloc[0]
-
-            # 准备学生详情
-            student_details = {
-                "student_id": str(student['Student_ID']),
-                "name": f"{student.get('First_Name', '')} {student.get('Last_Name', '')}".strip(),
-                "department": student.get('Department', ''),
-                "basic_info": {
-                    "total_score": float(student.get('Total_Score', 0)),
-                    "attendance": float(student.get('Attendance (%)', 0)),
-                    "age": int(student.get('Age', 0)),
-                    "gender": student.get('Gender', '')
-                },
-                "academic_performance": {
-                    "midterm_score": float(student.get('Midterm_Score', 0)),
-                    "final_score": float(student.get('Final_Score', 0)),
-                    "assignments_avg": float(student.get('Assignments_Avg', 0)),
-                    "quizzes_avg": float(student.get('Quizzes_Avg', 0)),
-                    "projects_score": float(student.get('Projects_Score', 0)),
-                    "participation_score": float(student.get('Participation_Score', 0))
-                },
-                "lifestyle_factors": {
-                    "study_hours_per_week": float(student.get('Study_Hours_per_Week', 0)),
-                    "sleep_hours_per_night": float(student.get('Sleep_Hours_per_Night', 0)),
-                    "stress_level": int(student.get('Stress_Level (1-10)', 0)),
-                    "extracurricular_activities": student.get('Extracurricular_Activities', ''),
-                    "internet_access": student.get('Internet_Access_at_Home', '')
-                }
-            }
-
-            # 添加风险评估信息（如果有）
-            if 'Risk_Probability' in student:
-                student_details["risk_assessment"] = {
-                    "risk_probability": float(student.get('Risk_Probability', 0)),
-                    "risk_level": student.get('Risk_Level', ''),
-                    "academic_risk": int(student.get('Academic_Risk', 0))
-                }
-
-            return {
-                "success": True,
-                "student_details": student_details
-            }
 
         except Exception as e:
             return {
                 "success": False,
-                "message": f"获取学生详情时发生错误: {str(e)}",
+                "message": f"获取房屋分析详情时发生错误: {str(e)}",
                 "error_code": "EXCEPTION",
                 "error_details": str(e)
             }
 
-    # ==================== 导出业务 ====================
+    # ==================== 数据导出业务 ====================
 
     def export_analysis_results(self, export_format: str = 'excel',
-                                include_warnings: bool = True) -> Dict[str, Any]:
+                                include_analysis: bool = True) -> Dict[str, Any]:
         """
         导出分析结果的业务逻辑
 
         Args:
-            export_format: 导出格式 ('csv', 'excel', 'json')
-            include_warnings: 是否包含预警信息
+            export_format: 导出格式 ('excel', 'csv', 'json')
+            include_analysis: 是否包含分析结果
 
         Returns:
             Dict: 导出结果信息
@@ -435,197 +377,82 @@ class AcademicWarningBusinessService:
                     "error_code": "NO_DATA"
                 }
 
-            # 生成文件名
+            # 生成导出文件名
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"academic_warning_export_{timestamp}"
+            filename = f"house_price_analysis_{timestamp}"
 
-            # 导出数据
+            # 执行导出
             export_path = self.system.export_results(
-                export_format=export_format,
-                filename=filename
+                filename=filename,
+                format=export_format,
+                include_analysis=include_analysis
             )
 
-            if export_path:
-                # 获取文件信息
-                file_size = os.path.getsize(export_path) if os.path.exists(export_path) else 0
-
+            if export_path and os.path.exists(export_path):
                 return {
                     "success": True,
-                    "message": "数据导出成功",
-                    "export_info": {
-                        "file_path": export_path,
-                        "file_name": os.path.basename(export_path),
-                        "file_size": file_size,
-                        "export_format": export_format,
-                        "export_time": datetime.now().isoformat(),
-                        "record_count": len(self.system.df)
-                    }
+                    "message": f"分析结果已导出到: {export_path}",
+                    "file_path": export_path,
+                    "file_size": os.path.getsize(export_path),
+                    "format": export_format
                 }
             else:
                 return {
                     "success": False,
-                    "message": "数据导出失败",
+                    "message": "导出失败",
                     "error_code": "EXPORT_FAILED"
                 }
 
         except Exception as e:
             return {
                 "success": False,
-                "message": f"导出数据时发生错误: {str(e)}",
+                "message": f"导出分析结果时发生错误: {str(e)}",
                 "error_code": "EXCEPTION",
                 "error_details": str(e)
             }
 
     # ==================== 可视化业务 ====================
 
-    # def generate_visualization_data(self) -> Dict[str, Any]:
-    #     """
-    #     生成可视化数据的业务逻辑
-    #
-    #     Returns:
-    #         Dict: 可视化数据
-    #     """
-    #     try:
-    #         if self.core_system.df is None:
-    #             return {
-    #                 "success": False,
-    #                 "message": "没有可用的数据",
-    #                 "error_code": "NO_DATA"
-    #             }
-    #
-    #         df = self.core_system.df
-    #
-    #         # 准备可视化数据
-    #         visualization_data = {
-    #             "basic_statistics": {
-    #                 "total_students": len(df),
-    #                 "average_score": float(df['Total_Score'].mean()) if 'Total_Score' in df.columns else 0,
-    #                 "passing_rate": float((df['Total_Score'] >= 60).mean() * 100) if 'Total_Score' in df.columns else 0,
-    #                 "average_attendance": float(df['Attendance (%)'].mean()) if 'Attendance (%)' in df.columns else 0
-    #             },
-    #             "score_distribution": self._get_score_distribution_data(df),
-    #             "department_analysis": self._get_department_analysis_data(df),
-    #             "risk_analysis": self._get_risk_analysis_data(df) if 'Risk_Level' in df.columns else None,
-    #             "correlation_data": self._get_correlation_data(df)
-    #         }
-    #
-    #         return {
-    #             "success": True,
-    #             "visualization_data": visualization_data
-    #         }
-    #
-    #     except Exception as e:
-    #         return {
-    #             "success": False,
-    #             "message": f"生成可视化数据时发生错误: {str(e)}",
-    #             "error_code": "EXCEPTION",
-    #             "error_details": str(e)
-    #         }
-
-    import matplotlib
-    matplotlib.use('TkAgg')
     def generate_visualization_data(self, save_image: bool = False) -> Dict[str, Any]:
         """
         生成可视化数据的业务逻辑
 
         Args:
-            save_image: 是否保存为图像文件
+            save_image: 是否保存图片
 
         Returns:
-            Dict: 可视化数据或图像文件路径
+            Dict: 可视化数据
         """
         try:
             if self.system.df is None:
                 return {
                     "success": False,
-                    "message": "没有可用的数据",
+                    "message": "没有可可视化的数据",
                     "error_code": "NO_DATA"
                 }
 
-            df = self.system.df
+            # 生成可视化
+            viz_data = self.system.generate_visualizations(save_image=save_image)
 
-            # 准备可视化数据（JSON 格式）
-            visualization_data = {
-                "basic_statistics": {
-                    "total_students": len(df),
-                    "average_score": float(df['Total_Score'].mean()) if 'Total_Score' in df.columns else 0,
-                    "passing_rate": float((df['Total_Score'] >= 60).mean() * 100) if 'Total_Score' in df.columns else 0,
-                    "average_attendance": float(df['Attendance (%)'].mean()) if 'Attendance (%)' in df.columns else 0
-                },
-                "score_distribution": self._get_score_distribution_data(df),
-                "department_analysis": self._get_department_analysis_data(df),
-                "risk_analysis": self._get_risk_analysis_data(df) if 'Risk_Level' in df.columns else None,
-                "correlation_data": self._get_correlation_data(df)
-            }
-
-            # 如果需要生成图像
-            image_path = None
-            if save_image:
-                # 创建 2x3 子图布局
-                fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-                fig.suptitle('学业预警系统 - 数据分析报告', fontsize=16)
-
-                # 子图 1: 总成绩分布（直方图）
-                axes[0, 0].hist(df['Total_Score'], bins=20, alpha=0.7, color='skyblue')
-                axes[0, 0].axvline(x=60, color='red', linestyle='--', label='及格线')
-                axes[0, 0].set_title('总成绩分布')
-                axes[0, 0].set_xlabel('总成绩')
-                axes[0, 0].set_ylabel('学生人数')
-                axes[0, 0].legend()
-
-                # 子图 2: 学业风险等级分布（饼图）
-                if 'Risk_Level' in df.columns:
-                    risk_counts = df['Risk_Level'].value_counts()
-                    axes[0, 1].pie(risk_counts.values, labels=risk_counts.index, autopct='%1.1f%%')
-                    axes[0, 1].set_title('学业风险等级分布')
-
-                # 子图 3: 出勤率与总成绩关系（散点图）
-                axes[0, 2].scatter(df['Attendance (%)'], df['Total_Score'], alpha=0.6)
-                axes[0, 2].set_title('出勤率与总成绩关系')
-                axes[0, 2].set_xlabel('出勤率 (%)')
-                axes[0, 2].set_ylabel('总成绩')
-
-                # 子图 4: 各系别成绩分布（箱线图）
-                if 'Department' in df.columns:
-                    dept_scores = []
-                    dept_names = []
-                    for dept in df['Department'].unique():
-                        dept_data = df[df['Department'] == dept]['Total_Score']
-                        dept_scores.append(dept_data)
-                        dept_names.append(dept)
-                    axes[1, 0].boxplot(dept_scores, labels=dept_names)
-                    axes[1, 0].set_title('各系别成绩分布')
-                    axes[1, 0].tick_params(axis='x', rotation=45)
-
-                # 子图 5: 每周学习时间与成绩关系（散点图）
-                axes[1, 1].scatter(df['Study_Hours_per_Week'], df['Total_Score'], alpha=0.6)
-                axes[1, 1].set_title('每周学习时间与成绩关系')
-                axes[1, 1].set_xlabel('每周学习时间(小时)')
-                axes[1, 1].set_ylabel('总成绩')
-
-                # 子图 6: 压力水平与平均成绩关系（柱状图）
-                stress_avg = df.groupby('Stress_Level (1-10)')['Total_Score'].mean()
-                axes[1, 2].bar(stress_avg.index, stress_avg.values)
-                axes[1, 2].set_title('压力水平与平均成绩关系')
-                axes[1, 2].set_xlabel('压力水平')
-                axes[1, 2].set_ylabel('平均成绩')
-
-                # 调整布局
-                plt.tight_layout()
-
-                # 保存图像
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                image_path = f"visualizations/academic_report_{timestamp}.png"
-                os.makedirs("visualizations", exist_ok=True)
-                plt.savefig(image_path)
-                plt.close(fig)  # 关闭图形以释放内存
-
-                visualization_data["image_path"] = image_path
-
-            return {
-                "success": True,
-                "visualization_data": visualization_data
-            }
+            if viz_data:
+                return {
+                    "success": True,
+                    "message": "可视化数据生成完成",
+                    "charts": {
+                        "price_distribution": self._get_price_distribution_data(),
+                        "location_analysis": self._get_location_analysis_data(),
+                        "house_type_analysis": self._get_house_type_analysis_data(),
+                        "price_trends": self._get_price_trends_data(),
+                        "correlation_analysis": self._get_correlation_data()
+                    },
+                    "image_paths": viz_data.get("image_paths", []) if save_image else []
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": "可视化数据生成失败",
+                    "error_code": "VISUALIZATION_FAILED"
+                }
 
         except Exception as e:
             return {
@@ -634,11 +461,60 @@ class AcademicWarningBusinessService:
                 "error_code": "EXCEPTION",
                 "error_details": str(e)
             }
+
+    def generate_model_evaluation_charts(self, save_image: bool = False) -> Dict[str, Any]:
+        """
+        生成模型评估图表的业务逻辑
+
+        Args:
+            save_image: 是否保存图片
+
+        Returns:
+            Dict: 模型评估数据
+        """
+        try:
+            if not self.system.model:
+                return {
+                    "success": False,
+                    "message": "没有可评估的模型，请先构建模型",
+                    "error_code": "NO_MODEL"
+                }
+
+            # 生成模型评估图表
+            eval_data = self.system.generate_model_evaluation_charts(save_image=save_image)
+
+            if eval_data:
+                return {
+                    "success": True,
+                    "message": "模型评估图表生成完成",
+                    "evaluation_metrics": self._get_model_performance_data(),
+                    "charts": {
+                        "prediction_vs_actual": eval_data.get("prediction_vs_actual", {}),
+                        "residual_plot": eval_data.get("residual_plot", {}),
+                        "feature_importance": eval_data.get("feature_importance", {})
+                    },
+                    "image_paths": eval_data.get("image_paths", []) if save_image else []
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": "模型评估图表生成失败",
+                    "error_code": "EVALUATION_FAILED"
+                }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"生成模型评估图表时发生错误: {str(e)}",
+                "error_code": "EXCEPTION",
+                "error_details": str(e)
+            }
+
     # ==================== 系统状态业务 ====================
 
     def get_system_status(self) -> Dict[str, Any]:
         """
-        获取系统状态信息
+        获取系统状态的业务逻辑
 
         Returns:
             Dict: 系统状态信息
@@ -646,25 +522,19 @@ class AcademicWarningBusinessService:
         try:
             status = {
                 "data_loaded": self.system.df is not None,
-                "current_import_id": self.current_import_id,
+                "data_shape": self.system.df.shape if self.system.df is not None else None,
                 "model_built": self.system.model is not None,
-                "features_prepared": len(self.system.feature_columns) > 0,
-                "system_ready": False
+                "current_import_id": self.current_import_id,
+                "system_version": "1.0.0",
+                "last_analysis_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
 
-            if status["data_loaded"]:
-                status["data_info"] = {
-                    "row_count": len(self.system.df),
-                    "column_count": len(self.system.df.columns),
-                    "has_predictions": 'Risk_Probability' in self.system.df.columns
-                }
-
-            # 判断系统是否就绪
-            status["system_ready"] = all([
-                status["data_loaded"],
-                status["features_prepared"],
-                status["model_built"]
-            ])
+            if self.system.df is not None:
+                status.update({
+                    "data_overview": self._get_data_overview(),
+                    "missing_values": self.system.df.isnull().sum().to_dict(),
+                    "data_types": self.system.df.dtypes.to_dict()
+                })
 
             return {
                 "success": True,
@@ -679,7 +549,7 @@ class AcademicWarningBusinessService:
                 "error_details": str(e)
             }
 
-    # ==================== 辅助方法 ====================
+    # ==================== 私有辅助方法 ====================
 
     def _get_data_overview(self) -> Dict[str, Any]:
         """获取数据概览"""
@@ -688,95 +558,263 @@ class AcademicWarningBusinessService:
 
         df = self.system.df
         return {
-            "total_records": len(df),
-            "columns_count": len(df.columns),
+            "total_rows": int(len(df)),
+            "total_columns": int(len(df.columns)),
+            "numeric_columns": int(len(df.select_dtypes(include=[np.number]).columns)),
+            "categorical_columns": int(len(df.select_dtypes(include=['object']).columns)),
             "missing_values": int(df.isnull().sum().sum()),
-            "average_score": float(df['Total_Score'].mean()) if 'Total_Score' in df.columns else 0,
-            "departments": df['Department'].unique().tolist() if 'Department' in df.columns else []
+            "duplicate_rows": int(df.duplicated().sum()),
+            "price_range": {
+                "min": float(df['price'].min()) if 'price' in df.columns else None,
+                "max": float(df['price'].max()) if 'price' in df.columns else None,
+                "mean": float(df['price'].mean()) if 'price' in df.columns else None
+            },
+            "area_range": {
+                "min": float(df['area_sqm'].min()) if 'area_sqm' in df.columns else None,
+                "max": float(df['area_sqm'].max()) if 'area_sqm' in df.columns else None,
+                "mean": float(df['area_sqm'].mean()) if 'area_sqm' in df.columns else None
+            }
         }
 
-    def _analyze_warnings(self, warnings: List[Dict]) -> Dict[str, Any]:
-        """分析预警统计"""
-        warning_types = {}
-        department_risks = {}
-
-        for warning in warnings:
-            # 统计预警类型
-            warning_type = warning.get("type", "未知")
-            warning_types[warning_type] = warning_types.get(warning_type, 0) + 1
-
-            # 统计系别风险（如果有系别信息）
-            if "department" in warning:
-                dept = warning["department"]
-                department_risks[dept] = department_risks.get(dept, 0) + 1
-
-        return {
-            "warning_types": warning_types,
-            "department_risks": department_risks
-        }
-
-    def _get_score_distribution_data(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """获取分数分布数据"""
-        if 'Total_Score' not in df.columns:
+    def _get_price_analysis_data(self) -> Dict[str, Any]:
+        """获取价格分析数据"""
+        if self.system.df is None:
             return {}
 
-        scores = df['Total_Score']
+        df = self.system.df
+        if 'price' not in df.columns:
+            return {}
+        price_levels = {}
+        if 'price_level' in df.columns:
+            price_levels = {str(k): int(v) for k, v in df['price_level'].value_counts().to_dict().items()}
         return {
-            "bins": [0, 40, 50, 60, 70, 80, 90, 100],
-            "counts": [
-                int((scores < 40).sum()),
-                int(((scores >= 40) & (scores < 50)).sum()),
-                int(((scores >= 50) & (scores < 60)).sum()),
-                int(((scores >= 60) & (scores < 70)).sum()),
-                int(((scores >= 70) & (scores < 80)).sum()),
-                int(((scores >= 80) & (scores < 90)).sum()),
-                int((scores >= 90).sum())
-            ]
+            "price_statistics": {
+                "mean": float(df['price'].mean()),
+                "median": float(df['price'].median()),
+                "std": float(df['price'].std()),
+                "min": float(df['price'].min()),
+                "max": float(df['price'].max()),
+                "q25": float(df['price'].quantile(0.25)),
+                "q75": float(df['price'].quantile(0.75))
+            },
+            "price_levels": price_levels,
+            "price_per_sqm_stats": {
+                "mean": float(df['price_per_sqm'].mean()) if 'price_per_sqm' in df.columns else None,
+                "median": float(df['price_per_sqm'].median()) if 'price_per_sqm' in df.columns else None
+            }
         }
 
-    def _get_department_analysis_data(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """获取系别分析数据"""
-        if 'Department' not in df.columns or 'Total_Score' not in df.columns:
+    def _get_location_analysis_data(self) -> Dict[str, Any]:
+        """获取位置分析数据"""
+        if self.system.df is None:
             return {}
 
-        dept_stats = df.groupby('Department')['Total_Score'].agg(['mean', 'count']).reset_index()
-
+        df = self.system.df
+        if 'district' not in df.columns:
+            return {}
+        district_distribution = {str(k): int(v) for k, v in df['district'].value_counts().to_dict().items()}
+        location_scores_distribution = {}
+        if 'location_score' in df.columns:
+            location_scores_distribution = {str(k): int(v) for k, v in df['location_score'].value_counts(bins=5).to_dict().items()}
         return {
-            "departments": dept_stats['Department'].tolist(),
-            "average_scores": dept_stats['mean'].round(2).tolist(),
-            "student_counts": dept_stats['count'].tolist()
+            "district_distribution": district_distribution,
+            "location_scores": {
+                "mean": float(df['location_score'].mean()) if 'location_score' in df.columns else None,
+                "distribution": location_scores_distribution
+            },
+            "subway_analysis": {
+                "near_subway": int(len(df[df['subway_distance'] <= 1000])) if 'subway_distance' in df.columns else 0,
+                "far_from_subway": int(len(df[df['subway_distance'] > 1000])) if 'subway_distance' in df.columns else 0
+            }
         }
 
-    def _get_risk_analysis_data(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """获取风险分析数据"""
-        if 'Risk_Level' not in df.columns:
+    def _get_house_type_analysis_data(self) -> Dict[str, Any]:
+        """获取房屋类型分析数据"""
+        if self.system.df is None:
             return {}
 
-        risk_counts = df['Risk_Level'].value_counts()
-
+        df = self.system.df
+        house_type_distribution = {}
+        room_count_distribution = {}
+        decoration_distribution = {}
+        orientation_distribution = {}
+        if 'house_type' in df.columns:
+            house_type_distribution = {str(k): int(v) for k, v in df['house_type'].value_counts().to_dict().items()}
+        if 'room_count' in df.columns:
+            room_count_distribution = {str(k): int(v) for k, v in df['room_count'].value_counts().to_dict().items()}
+        if 'decoration' in df.columns:
+            decoration_distribution = {str(k): int(v) for k, v in df['decoration'].value_counts().to_dict().items()}
+        if 'orientation' in df.columns:
+            orientation_distribution = {str(k): int(v) for k, v in df['orientation'].value_counts().to_dict().items()}
         return {
-            "risk_levels": risk_counts.index.tolist(),
-            "counts": risk_counts.values.tolist(),
-            "percentages": (risk_counts / len(df) * 100).round(2).tolist()
+            "house_type_distribution": house_type_distribution,
+            "room_count_distribution": room_count_distribution,
+            "decoration_distribution": decoration_distribution,
+            "orientation_distribution": orientation_distribution
         }
 
-    def _get_correlation_data(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """获取相关性数据"""
+    def _get_price_trends_data(self) -> Dict[str, Any]:
+        """获取价格趋势数据"""
+        if self.system.df is None:
+            return {}
+
+        df = self.system.df
+        if 'price' not in df.columns or 'district' not in df.columns:
+            return {}
+        district_price_comparison = {k: {stat: float(vv) for stat, vv in v.items()} for k, v in df.groupby('district')['price'].agg(['mean', 'median', 'count']).to_dict().items()}
+        house_type_price_comparison = {}
+        if 'house_type' in df.columns:
+            house_type_price_comparison = {k: {stat: float(vv) for stat, vv in v.items()} for k, v in df.groupby('house_type')['price'].agg(['mean', 'median', 'count']).to_dict().items()}
+        return {
+            "district_price_comparison": district_price_comparison,
+            "house_type_price_comparison": house_type_price_comparison
+        }
+
+    def _get_correlation_data(self) -> Dict[str, Any]:
+        """获取相关性分析数据"""
+        if self.system.df is None:
+            return {}
+
+        df = self.system.df
         numeric_cols = df.select_dtypes(include=[np.number]).columns
+        
         if len(numeric_cols) < 2:
             return {}
 
-        # 选择主要的数值列
-        main_cols = ['Total_Score', 'Attendance (%)', 'Study_Hours_per_Week',
-                     'Sleep_Hours_per_Night', 'Stress_Level (1-10)']
-        available_cols = [col for col in main_cols if col in numeric_cols]
+        correlation_matrix = df[numeric_cols].corr()
+        return {
+            "correlation_matrix": {k: {kk: float(vv) for kk, vv in v.items()} for k, v in correlation_matrix.to_dict().items()},
+            "price_correlations": {str(k): float(v) for k, v in correlation_matrix['price'].to_dict().items()} if 'price' in correlation_matrix.columns else {}
+        }
 
-        if len(available_cols) < 2:
+    def _get_investment_recommendations(self) -> Dict[str, Any]:
+        """获取投资建议数据"""
+        if self.system.df is None:
             return {}
 
-        corr_matrix = df[available_cols].corr()
+        df = self.system.df
+        if 'investment_potential' not in df.columns:
+            return {}
+
+        top_recommendations_df = df.nlargest(10, 'investment_potential')[['description', 'price', 'location', 'investment_potential']]
+        top_recommendations = [
+            {
+                "description": str(row["description"]),
+                "price": float(row["price"]),
+                "location": str(row["location"]),
+                "investment_potential": float(row["investment_potential"])
+            } for _, row in top_recommendations_df.iterrows()
+        ]
+        return {
+            "high_potential_houses": int(len(df[df['investment_potential'] >= 0.8])),
+            "medium_potential_houses": int(len(df[(df['investment_potential'] >= 0.6) & (df['investment_potential'] < 0.8)])),
+            "low_potential_houses": int(len(df[df['investment_potential'] < 0.6])),
+            "top_recommendations": top_recommendations
+        }
+
+    def _analyze_house_price(self, house_data: Dict) -> Dict[str, Any]:
+        """分析单个房屋价格"""
+        if not house_data or 'price' not in house_data:
+            return {}
+
+        price = house_data['price']
+        df = self.system.df
+
+        if df is None or 'price' not in df.columns:
+            return {}
 
         return {
-            "features": available_cols,
-            "correlation_matrix": corr_matrix.round(3).to_dict()
+            "price_percentile": float((df['price'] <= price).mean() * 100),
+            "price_comparison": {
+                "vs_mean": price - float(df['price'].mean()),
+                "vs_median": price - float(df['price'].median()),
+                "price_level": house_data.get('price_level', '未知')
+            }
+        }
+
+    def _analyze_house_location(self, house_data: Dict) -> Dict[str, Any]:
+        """分析单个房屋位置"""
+        if not house_data:
+            return {}
+
+        return {
+            "location_score": house_data.get('location_score', None),
+            "subway_accessibility": "便利" if house_data.get('subway_distance', 9999) <= 1000 else "一般",
+            "district_ranking": self._get_district_ranking(house_data.get('district', ''))
+        }
+
+    def _analyze_investment_potential(self, house_data: Dict) -> Dict[str, Any]:
+        """分析单个房屋投资潜力"""
+        if not house_data:
+            return {}
+
+        potential = house_data.get('investment_potential', 0)
+        return {
+            "investment_potential": potential,
+            "potential_level": "高" if potential >= 0.8 else "中" if potential >= 0.6 else "低",
+            "recommendation": self._get_investment_recommendation(potential)
+        }
+
+    def _get_district_ranking(self, district: str) -> str:
+        """获取区域排名"""
+        if not district or self.system.df is None:
+            return "未知"
+
+        df = self.system.df
+        if 'district' not in df.columns or 'price' not in df.columns:
+            return "未知"
+
+        district_prices = df.groupby('district')['price'].mean().sort_values(ascending=False)
+        try:
+            district_index_list = [str(idx) for idx in district_prices.index]
+            rank = int(district_index_list.index(str(district))) + 1
+            total = int(len(district_prices))
+            return f"{rank}/{total}"
+        except:
+            return "未知"
+
+    def _get_investment_recommendation(self, potential: float) -> str:
+        """获取投资建议"""
+        if potential >= 0.8:
+            return "强烈推荐"
+        elif potential >= 0.6:
+            return "推荐"
+        elif potential >= 0.4:
+            return "一般"
+        else:
+            return "不推荐"
+
+    def _get_model_performance_data(self) -> Dict[str, Any]:
+        """获取模型性能数据"""
+        if not self.system.model:
+            return {}
+
+        try:
+            return self.system.get_model_performance()
+        except:
+            return {}
+
+    def _get_price_distribution_data(self) -> Dict[str, Any]:
+        """获取价格分布数据"""
+        if self.system.df is None:
+            return {}
+
+        df = self.system.df
+        if 'price' not in df.columns:
+            return {}
+
+        return {
+            "price_ranges": {
+                "0-200万": int(len(df[df['price'] <= 200])),
+                "200-500万": int(len(df[(df['price'] > 200) & (df['price'] <= 500)])),
+                "500-1000万": int(len(df[(df['price'] > 500) & (df['price'] <= 1000)])),
+                "1000万以上": int(len(df[df['price'] > 1000]))
+            },
+            "price_statistics": {
+                "mean": float(df['price'].mean()),
+                "median": float(df['price'].median()),
+                "std": float(df['price'].std()),
+                "min": float(df['price'].min()),
+                "max": float(df['price'].max())
+            }
         }

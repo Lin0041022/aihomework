@@ -3,13 +3,14 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 import shutil
 import os
+import traceback
+import matplotlib.pyplot as plt
 
 from backend.database.db import SessionLocal
-# from backend.services.warning_service import AcademicWarningBusinessService  # 引入业务服务层
-from backend.services.warning_service import AcademicWarningBusinessService
+from backend.services.warning_service import HousePriceAnalysisBusinessService
 
 router = APIRouter()
-warning_service = AcademicWarningBusinessService()  # 初始化业务服务层
+house_analysis_service = HousePriceAnalysisBusinessService()  # 初始化业务服务层
 
 
 # -------------------- 依赖 -------------------- #
@@ -29,7 +30,7 @@ def get_import_records(db: Session = Depends(get_db)):
     获取导入记录列表
     """
     try:
-        result = warning_service.get_import_records_list(db)
+        result = house_analysis_service.get_import_records_list(db)
         if result["success"]:
             return result
         else:
@@ -44,7 +45,7 @@ def load_history(import_id: str = Form(...), db: Session = Depends(get_db)):
     加载历史数据
     """
     try:
-        result = warning_service.load_historical_data(import_id, db)
+        result = house_analysis_service.load_historical_data(import_id, db)
         if result["success"]:
             return result
         else:
@@ -64,7 +65,7 @@ def load_new_data(file: UploadFile = File(...), db: Session = Depends(get_db)):
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        result = warning_service.load_new_data_from_file(temp_path, db)
+        result = house_analysis_service.load_new_data_from_file(temp_path, db)
         if result["success"]:
             return result
         else:
@@ -82,7 +83,7 @@ def preprocess_data():
     执行数据预处理
     """
     try:
-        result = warning_service.execute_data_preprocessing()
+        result = house_analysis_service.execute_data_preprocessing()
         if result["success"]:
             return result
         else:
@@ -97,7 +98,7 @@ def build_model():
     构建预测模型
     """
     try:
-        result = warning_service.build_prediction_model()
+        result = house_analysis_service.build_prediction_model()
         if result["success"]:
             return result
         else:
@@ -106,34 +107,20 @@ def build_model():
         raise HTTPException(status_code=500, detail=f"模型构建失败: {str(e)}")
 
 
-@router.post("/warnings/generate")
-def generate_warnings(db: Session = Depends(get_db)):
+@router.post("/analysis/generate")
+def generate_house_analysis(db: Session = Depends(get_db)):
     """
-    生成学业预警
+    生成房价分析
     """
     try:
-        result = warning_service.generate_academic_warnings(db)
+        result = house_analysis_service.generate_house_analysis(db)
         if result["success"]:
             return result
         else:
             raise HTTPException(status_code=500, detail=result["message"])
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生成预警失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"生成房价分析失败: {str(e)}")
 
-
-# @router.get("/visualizations")
-# def get_visualizations():
-#     """
-#     获取可视化数据
-#     """
-#     try:
-#         result = warning_service.generate_visualization_data()
-#         if result["success"]:
-#             return result
-#         else:
-#             raise HTTPException(status_code=500, detail=result["message"])
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"生成可视化数据失败: {str(e)}")
 
 @router.get("/visualizations")
 def get_visualizations():
@@ -141,14 +128,14 @@ def get_visualizations():
     获取可视化图表（返回图像文件）
     """
     try:
-        result = warning_service.generate_visualization_data(save_image=True)
+        result = house_analysis_service.generate_visualization_data(save_image=True)
         if result["success"]:
-            image_path = result["visualization_data"].get("image_path")
-            if image_path and os.path.exists(image_path):
+            image_paths = result.get("image_paths", [])
+            if image_paths and os.path.exists(image_paths[0]):
                 return FileResponse(
-                    image_path,
+                    image_paths[0],
                     media_type="image/png",
-                    filename="academic_report.png"
+                    filename="house_price_analysis.png"
                 )
             else:
                 raise HTTPException(status_code=500, detail="图像文件生成失败")
@@ -158,36 +145,76 @@ def get_visualizations():
         raise HTTPException(status_code=500, detail=f"生成可视化图表失败: {str(e)}")
 
 
-@router.get("/export/warnings")
-def export_warnings():
+@router.get("/export/analysis")
+def export_analysis():
     """
-    导出预警结果
+    导出分析结果
     """
     try:
-        result = warning_service.export_analysis_results(export_format="csv")
+        result = house_analysis_service.export_analysis_results(export_format="excel")
         if result["success"]:
-            export_path = result["export_info"]["file_path"]
+            export_path = result["file_path"]
             return FileResponse(
                 export_path,
-                media_type="text/csv",
-                filename=result["export_info"]["file_name"]
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                filename="house_price_analysis.xlsx"
             )
         else:
             raise HTTPException(status_code=500, detail=result["message"])
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"导出预警失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"导出分析结果失败: {str(e)}")
 
 
-@router.get("/student/{student_id}")
-def get_student_details(student_id: str):
+@router.get("/house/{house_id}")
+def get_house_details(house_id: str):
     """
-    获取特定学生的风险详情
+    获取特定房屋的分析详情
     """
     try:
-        result = warning_service.get_student_risk_details(student_id)
+        result = house_analysis_service.get_house_analysis_details(house_id)
         if result["success"]:
             return result
         else:
             raise HTTPException(status_code=404, detail=result["message"])
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取学生详情失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取房屋详情失败: {str(e)}")
+
+
+@router.get("/visualizations/model-evaluation")
+def get_model_evaluation_charts():
+    """
+    获取模型评估图表
+    """
+    try:
+        result = house_analysis_service.generate_model_evaluation_charts(save_image=True)
+        if result["success"]:
+            image_paths = result.get("image_paths", [])
+            if image_paths and os.path.exists(image_paths[0]):
+                return FileResponse(
+                    image_paths[0],
+                    media_type="image/png",
+                    filename="model_evaluation.png"
+                )
+            else:
+                raise HTTPException(status_code=500, detail="模型评估图像生成失败")
+        else:
+            raise HTTPException(status_code=500, detail=result["message"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成模型评估图表失败: {str(e)}")
+
+
+@router.get("/system/status")
+def get_system_status():
+    """
+    获取系统状态
+    """
+    try:
+        result = house_analysis_service.get_system_status()
+        if result["success"]:
+            return result
+        else:
+            raise HTTPException(status_code=500, detail=result["message"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取系统状态失败: {str(e)}")
+
+
